@@ -24,50 +24,69 @@ namespace ConsoleApp1
 			var authkey = query_param_dic["authkey"].ToString();
 			query_param_dic.Remove("authkey");
 
-			// 検索条件作成
-			var query_param_txt = await new FormUrlEncodedContent(query_param_dic).ReadAsStringAsync();
-
-
-			// Headerの設定
-			client.DefaultRequestHeaders.Accept.Clear();
-			client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/x-www-form-urlencoded+json"));
-			client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authkey);
-
-			// Slackからデータ取得
-			var message = new HttpRequestMessage(HttpMethod.Post, $"https://slack.com/api/search.files?{query_param_txt}");
-			var slack_response1 = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead);
-			var m = await slack_response1.Content.ReadAsStreamAsync();
-
-			// Jsonからオブジェクトに変換
-			var slack = await JsonSerializer.DeserializeAsync<Rootobject>(m);
-
-			// 一致したデータに対する処理
-			foreach (var matche in slack.files.matches)
+			// page取得してその分繰り返す
+			var page = 0;
+			if(!int.TryParse(query_param_dic["page"].ToString(),out page))
 			{
-				Console.WriteLine(matche.name);
-				Console.WriteLine(matche.url_private_download);
-				if(matche.url_private_download==null)
+				Console.WriteLine("エラー：pageが数値に変換できませんでした。");
+				return;
+			}
+			if(5 < page || page <= 0)
+			{
+				Console.WriteLine("エラー：pageは1～5を指定してください。");
+				return;
+			}
+			for (var i = 0; i < page; i++)
+			{
+				// page数を書き換える
+				query_param_dic.Remove("page");
+				query_param_dic.Add("page", (i+1).ToString());
+
+				// 検索条件作成
+				var query_param_txt = await new FormUrlEncodedContent(query_param_dic).ReadAsStringAsync();
+
+
+				// Headerの設定
+				client.DefaultRequestHeaders.Accept.Clear();
+				client.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/x-www-form-urlencoded+json"));
+				client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", authkey);
+
+				// Slackからデータ取得
+				var message = new HttpRequestMessage(HttpMethod.Post, $"https://slack.com/api/search.files?{query_param_txt}");
+				var slack_response1 = await client.SendAsync(message, HttpCompletionOption.ResponseHeadersRead);
+				var m = await slack_response1.Content.ReadAsStreamAsync();
+
+				// Jsonからオブジェクトに変換
+				var slack = await JsonSerializer.DeserializeAsync<Rootobject>(m);
+
+				// 一致したデータに対する処理
+				foreach (var matche in slack.files.matches)
 				{
-					Console.WriteLine("ダウンロード対象が存在しません。スキップします。");
-					continue;
-				}
-				Console.WriteLine("ダウンロード中...");
-				using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri(matche.url_private_download)))
-				using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead))
-				{
-					if (response.StatusCode == System.Net.HttpStatusCode.OK)
+					Console.WriteLine(matche.name);
+					Console.WriteLine(matche.url_private_download);
+					if(matche.url_private_download==null)
 					{
-						var fullpath = System.IO.Path.Combine(download_dir, matche.name);
-						using (var content = response.Content)
-						using (var stream = await content.ReadAsStreamAsync())
-						using (var fileStream = new FileStream(fullpath, FileMode.Create, FileAccess.Write, FileShare.None))
+						Console.WriteLine("ダウンロード対象が存在しません。スキップします。");
+						continue;
+					}
+					Console.WriteLine("ダウンロード中...");
+					using (var request = new HttpRequestMessage(HttpMethod.Get, new Uri(matche.url_private_download)))
+					using (var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead))
+					{
+						if (response.StatusCode == System.Net.HttpStatusCode.OK)
 						{
-							stream.CopyTo(fileStream);
+							var fullpath = System.IO.Path.Combine(download_dir, matche.name);
+							using (var content = response.Content)
+							using (var stream = await content.ReadAsStreamAsync())
+							using (var fileStream = new FileStream(fullpath, FileMode.Create, FileAccess.Write, FileShare.None))
+							{
+								stream.CopyTo(fileStream);
+							}
 						}
 					}
+					Console.WriteLine("ダウンロード完了");
+					Console.WriteLine();
 				}
-				Console.WriteLine("ダウンロード完了");
-				Console.WriteLine();
 			}
 		}
 
@@ -82,6 +101,12 @@ namespace ConsoleApp1
 
 			Console.WriteLine("※appsettings.jsonはUTF-8で保存してください。");
 			Console.WriteLine();
+
+			string page = section["page"];
+			Console.WriteLine("【取得ページ数】");
+			Console.WriteLine(string.IsNullOrWhiteSpace(page) ? "指定してください。" : page);
+			Console.WriteLine();
+
 			string query = section["query"];
 			Console.WriteLine("【検索クエリ】");
 			Console.WriteLine(string.IsNullOrWhiteSpace(query)?"指定してください。": query);
@@ -152,6 +177,7 @@ namespace ConsoleApp1
 				{ "pretty", "1" },
 				{ "download_dir", download_dir },
 				{ "authkey", authkey },
+				{ "page", page},
 			};
 
 		}
